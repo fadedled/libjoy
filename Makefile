@@ -111,7 +111,7 @@ $(BUILD):
 	echo $(LIBPATHS)
 	@[ -d $@ ] || mkdir -p $@
 	@$(MAKE) --no-print-directory -C $(BUILD) -f $(CURDIR)/Makefile
-	$(AR) rcs bin/libjoy.a build/joy.o
+	$(AR) rcs lib/libjoy.a build/joy.o
 
 #---------------------------------------------------------------------------------
 clean:
