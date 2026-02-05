@@ -23,6 +23,7 @@
 
 #define DEFAULT_FIFO_SIZE       (256*1024)
 
+extern u32 debug_pack_type[4];
 
 extern const u8 tex_pad64_4bpp_data[] ATTRIBUTE_ALIGN(32);
 u8 *frameBuffer[2] ATTRIBUTE_ALIGN(32);
@@ -56,6 +57,11 @@ static void __drawPad64(JOYStatus *status, u32 x, u32 y)
 {
 	const u32 PAD_WIDTH = 112;
 
+	GX_ClearVtxDesc();
+	GX_SetVtxDesc(GX_VA_POS, GX_DIRECT);
+	GX_SetVtxDesc(GX_VA_TEX0, GX_DIRECT);
+
+	GX_SetNumChans(0);
 	Mtx mat;
 	guMtxIdentity(mat);
 	guMtxScale(mat, 2.0, 2.0, 1.0);
@@ -63,6 +69,7 @@ static void __drawPad64(JOYStatus *status, u32 x, u32 y)
 	GX_LoadPosMtxImm(mat, GX_PNMTX0);
 	GX_LoadTexObj(&tex_n64pad, GX_TEXMAP0);
 
+	GX_SetTevOrder(GX_TEVSTAGE0, GX_TEXCOORD0, GX_TEXMAP0, GX_COLORNULL);
 	GX_SetTexCoordScaleManually(GX_TEXCOORD0, GX_TRUE, 8, 8);
 
 	GX_SetTevKColor(GX_KCOLOR0, (GXColor){0xff, 0xff, 0xff, 0xff});
@@ -246,13 +253,19 @@ static void __drawPadGC(PADStatus *status, u32 x, u32 y)
 {
 	const u32 PAD_WIDTH = 112;
 
+	GX_ClearVtxDesc();
+	GX_SetVtxDesc(GX_VA_POS, GX_DIRECT);
+	GX_SetVtxDesc(GX_VA_TEX0, GX_DIRECT);
+
 	Mtx mat;
+	GX_SetNumChans(0);
 	guMtxIdentity(mat);
 	guMtxScale(mat, 2.0, 2.0, 1.0);
 	guMtxTransApply(mat, mat, x, y, 0.0);
 	GX_LoadPosMtxImm(mat, GX_PNMTX0);
 	GX_LoadTexObj(&tex_gcpad, GX_TEXMAP0);
 
+	GX_SetTevOrder(GX_TEVSTAGE0, GX_TEXCOORD0, GX_TEXMAP0, GX_COLORNULL);
 	GX_SetTexCoordScaleManually(GX_TEXCOORD0, GX_TRUE, 8, 8);
 
 	GX_SetTevKColor(GX_KCOLOR0, (GXColor){0xff, 0xff, 0xff, 0xff});
@@ -527,7 +540,7 @@ int main()
 
 	//Initialize GC pads
 	JOY_Init(pads64, pads);
-
+	LOG_Init();
 #ifdef USE_SAMPLE_CB
 	JOY_SetPollingCallback(gcsample_cb, 0);
 #endif
@@ -552,20 +565,22 @@ int main()
 			u32 y = pad_pos[i][1];
 			if (pads64[i].err == JOY_ERR_NONE) {
 				__drawPad64(&pads64[i], x, y);
-
+				u32 ret_val = debug_pack_type[i];
 				u32 pak_type = JOY_InitPak(i);
+				JOY_RumbleCtrl(i, pads64[i].button & JOY_TRG_R);
 
 				LOG_printf(x, y + 140,
 					"PAD: N64 (%d)\nbtn:   %04X\nstickX: %3d\nstickY: %3d\n",
 					pads64[i].err, pads64[i].button, (s32) pads64[i].stickX, (s32) pads64[i].stickY);
 				//Show pak type
+				char *pak_name = "NONE";
 				switch(pak_type) {
-					case JOY_PAK_TYPE_NONE:	    LOG_printf(x, y + 140 + 64, "PAK: NONE"); break;
-					case JOY_PAK_TYPE_RUMBLE:	LOG_printf(x, y + 140 + 64, "PAK: RUMBLE"); break;
-					case JOY_PAK_TYPE_MEMORY:	LOG_printf(x, y + 140 + 64, "PAK: MEMORY"); break;
-					case JOY_PAK_TYPE_TRANSFER:	LOG_printf(x, y + 140 + 64, "PAK: TRANSFER"); break;
-					case JOY_PAK_TYPE_UNKNOWN:	LOG_printf(x, y + 140 + 64, "PAK: UNKNOWN"); break;
+					case JOY_PAK_TYPE_RUMBLE:	pak_name = "RUMBLE"; break;
+					case JOY_PAK_TYPE_MEMORY:	pak_name = "MEMORY"; break;
+					case JOY_PAK_TYPE_TRANSFER:	pak_name = "TRANSFER"; break;
+					case JOY_PAK_TYPE_UNKNOWN:	pak_name = "UNKNOWN"; break;
 				}
+				LOG_printf(x, y + 140 + 64, "PAK: %08x %s", ret_val, pak_name);
 			} else if (pads[i].err == PAD_ERR_NONE) {
 				//__drawPad64((PAD64Status*) (&pads[i]), x, y);
 				__drawPadGC(&pads[i], x, y);
@@ -578,7 +593,7 @@ int main()
 					pads[i].err, 0, 0, 0);
 			}
 		}
-
+		LOG_Draw();
 		GX_DrawDone();
 		GX_SetBlendMode(GX_BM_NONE, GX_BL_SRCALPHA, GX_BL_INVSRCALPHA, GX_LO_CLEAR);
 		GX_SetAlphaUpdate(GX_TRUE);

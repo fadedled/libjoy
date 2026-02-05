@@ -35,14 +35,16 @@ struct {
 struct Pak {
 	u32 type;
 	u32 reset;
+	u32 rumble;
 	u8 out_buffer[40];
 	u8 in_buffer[40];
 } __paks[JOY_CHANMAX];
 
+u32 debug_pack_type[4];
 
 #define __JOY_RESET(joy) (*((u32*)joy) = 0)
 
-static void __scan_cb() { /*Does nothing*/ }
+static void __scan_cb(s32 ch, u32 type) { /*Does nothing*/ }
 
 
 
@@ -85,10 +87,13 @@ u32 JOY_Read(JOYStatus *joy, PADStatus *pad)
 			//Check for N64 pad
 			if ((type & SI_TYPE_MASK) == SI_TYPE_N64) {
 				//Store pak info
+				debug_pack_type[ch] = type;
+				u32 pak_status = (type >> 8) & 0x3;
 				u32 pak = ((type >> 8) & 0x1) << ch;
-				channels |= 1 << ch;
+
 				has_pak = (has_pak & ~pak) | pak;	//Set pak bit
-				pak_init &= pak;					//If no pak then deinit
+				pak_init &= ~(pak & ~channels);					//If no pak then deinit
+				channels |= 1 << ch;
 				if (pak) {
 					__paks[ch].type = ((pak_init >> ch) & 0x1) ? __paks[ch].type : JOY_PAK_TYPE_UNKNOWN;
 				} else {
@@ -161,29 +166,43 @@ const u8 ckeck_tbl_hi[32] = {
 	0x1a, 0x1d, 0x14, 0x13, 0x06, 0x01, 0x08, 0x0f, 0x17, 0x10, 0x19, 0x1e, 0x0b, 0x0c, 0x05, 0x02
 };
 
+static void __inittype_cb(s32 ch, u32 type)
+{
+	if (__paks[ch].in_buffer[0] == 0x00) { // transfer or controller pak
+		//Test for Transfer Pak
+		//__writeControllerAccessory1(ch, 0x8000, 0x84);
+		//__readControllerAccessory(ch, 0x8000);
+		__paks[ch].type = JOY_PAK_TYPE_MEMORY; //(__paks[ch].in_buffer[0] == 0x84 ? JOY_PAK_TYPE_TRANSFER : JOY_PAK_TYPE_MEMORY);
+	} else if (__paks[ch].in_buffer[0] == 0x80) {	// Is rumble pak
+		__paks[ch].type = JOY_PAK_TYPE_RUMBLE;
+	}
+	//pak is now initialized
+	pak_init |= 1 << ch;
+}
+
 
 static inline u32 __genAddressChecksum(u32 addr) {
 	return ckeck_tbl_lo[(addr >> 5) & 0x1F] ^ ckeck_tbl_hi[(addr >> 10) & 0x1F] ^ (addr >> 15);
 }
 
-static void __readControllerAccessory(u32 ch, u32 addr)
+static void __readControllerAccessory(u32 ch, u32 addr, SICallback cb)
 {
 	__paks[ch].out_buffer[0] = 0x02;
 	__paks[ch].out_buffer[1] = (addr >> 8) & 0xFF;
 	__paks[ch].out_buffer[2] = (addr  & 0xE0) | __genAddressChecksum(addr);
-	SI_Transfer(ch, __paks[ch].out_buffer, 3, __paks[ch].in_buffer, 33, __scan_cb, 0);
+	SI_Transfer(ch, __paks[ch].out_buffer, 3, __paks[ch].in_buffer, 33, cb, 0);
 }
 
-static void __writeControllerAccessory1(u32 ch, u32 addr, u8 data)
+static void __writeControllerAccessory1(u32 ch, u32 addr, u8 data, SICallback cb)
 {
 	__paks[ch].out_buffer[0] = 0x03;
 	__paks[ch].out_buffer[1] = (addr >> 8) & 0xFF;
 	__paks[ch].out_buffer[2] = (addr  & 0xE0) | __genAddressChecksum(addr);
 	memset(__paks[ch].out_buffer+3, data, 32);
-	SI_Transfer(ch, __paks[ch].out_buffer, 35, __paks[ch].in_buffer, 1, __scan_cb, 0);
+	SI_Transfer(ch, __paks[ch].out_buffer, 35, __paks[ch].in_buffer, 1, cb, 0);
 }
 
-static void __writeControllerAccessory(u32 ch, u32 addr, u8 *data, u8 num_bytes)
+static void __writeControllerAccessory(u32 ch, u32 addr, u8 *data, u8 num_bytes, SICallback cb)
 {
 	//Max 32 bytes
 	num_bytes = num_bytes > 32 ? 32 : num_bytes;
@@ -191,7 +210,7 @@ static void __writeControllerAccessory(u32 ch, u32 addr, u8 *data, u8 num_bytes)
 	__paks[ch].out_buffer[1] = (addr >> 8) & 0xFF;
 	__paks[ch].out_buffer[2] = (addr  & 0xE0) | __genAddressChecksum(addr);
 	memcpy(__paks[ch].out_buffer+3, data, num_bytes);
-	SI_Transfer(ch, __paks[ch].out_buffer, 35, __paks[ch].in_buffer, 1, __scan_cb, 0);
+	SI_Transfer(ch, __paks[ch].out_buffer, 35, __paks[ch].in_buffer, 1, cb, 0);
 }
 
 
@@ -205,19 +224,9 @@ u32 JOY_InitPak(u32 ch)
 		}
 		__paks[ch].type = JOY_PAK_TYPE_UNKNOWN;
 		//TODO: Must this be done?
-		//__writeControllerAccessory1(0x8000, 0xFE);
+		//__writeControllerAccessory1(ch, 0x8000, 0xFE);
 		//Test for Rumble Pak
-		__readControllerAccessory(ch, 0x8000);
-		if (__paks[ch].in_buffer[0] == 0x00) { // transfer or controller pak
-			//Test for Transfer Pak
-			__writeControllerAccessory1(ch, 0x8000, 0x84);
-			__readControllerAccessory(ch, 0x8000);
-			__paks[ch].type = (__paks[ch].in_buffer[0] == 0x84 ? JOY_PAK_TYPE_TRANSFER : JOY_PAK_TYPE_MEMORY);
-		} else if (__paks[ch].in_buffer[0] == 0x00) {	// Is rumble pak
-			__paks[ch].type = JOY_PAK_TYPE_RUMBLE;
-		}
-		//pak is now initialized
-		pak_init |= 1 << ch;
+		__readControllerAccessory(ch, 0x8000, __inittype_cb);
 	} else {
 		__paks[ch].type = JOY_PAK_TYPE_NONE;
 	}
@@ -240,10 +249,14 @@ u32 JOY_GetPakType(u32 ch)
 
 s32 JOY_RumbleCtrl(u32 ch, u32 enable)
 {
-	if (__paks[ch].type == JOY_PAK_TYPE_RUMBLE) {
-		__writeControllerAccessory1(ch, 0xC000, enable > 0);
-		return 1;
+	enable = enable > 0;
+	//if (__paks[ch].type == JOY_PAK_TYPE_RUMBLE) {
+	if (__paks[ch].rumble != enable) {
+		__paks[ch].rumble = enable;
+		__writeControllerAccessory1(ch, 0xC000, enable, __scan_cb);
 	}
+	//	return 1;
+	//}
 	return 0;
 }
 

@@ -13,10 +13,16 @@
  * this program; if not, see <http://www.gnu.org/licenses/>.
  *******************************************************************************/
 
-#ifndef __LOG_H__
-#define __LOG_H__
+#ifndef __DLOG_H__
+#define __DLOG_H__
 
 
-int LOG_printf(int x, int y, const char* fmt, ...);
+#define DLOG_SCALE_8 	0
+#define DLOG_SCALE_16 	1
 
-#endif /*__LOG_H__*/
+void LOG_Init(void);
+void LOG_Scale(int scale);
+int  LOG_printf(int x, int y, const char* fmt, ...);
+void LOG_Draw(void);
+
+#endif /*__DLOG_H__*/
